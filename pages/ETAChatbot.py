@@ -13,6 +13,11 @@ from dotenv import load_dotenv
 # Load Credential
 load_dotenv()
 
+#List to hold components
+context_texts = []
+source_metadata_list = []
+source_counter = 1
+
 #Open AI/LangChain/Pinecone
 #pinecone spec
 model_name = 'multilingual-e5-large'
@@ -65,17 +70,46 @@ if prompt := st.chat_input("START NOW"):
     # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(prompt)
-        ans3_rag = eta_retrieval_chain.invoke({"input": prompt})
+        ans_rag = eta_retrieval_chain.invoke({"input": prompt})
 
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
-        assistant_response = ans3_rag['answer']
+        # The AI answer
+        assistant_response = ans_rag['answer']
         for chunk in assistant_response.split():
             full_response += chunk + " "
             time.sleep(0.05)
-            # Add a blinking cursor to simulate typing
             message_placeholder.markdown(full_response + "▌")
         message_placeholder.markdown(full_response)
+
+        # The AI refer
+        for doc in ans_rag['context']:
+            metadata = doc.metadata
+            citation_key = f"{metadata.get('title')}_{metadata.get('author')}"
+            full_citation = (
+                f"**{metadata.get('title', 'N/A')}** "
+                f"Author(s): {metadata.get('author', 'N/A')}. "
+                f"Source: *{metadata.get('source', 'N/A')}*."
+            )
+            
+            source_metadata_list.append({
+                "key": citation_key, 
+                "full_citation": full_citation
+            })
+        unique_sources = {}
+        for item in source_metadata_list:
+            if item['key'] not in unique_sources:
+                source_tag = f"[Source {chr(64 + source_counter)}]"
+                unique_sources[item['key']] = {
+                    "tag": source_tag,
+                    "citation": item['full_citation']
+                }
+                source_counter += 1
+        summary_answer = ans_rag['answer']
+        citation_list = [f"{info['tag']} {info['citation']}" for info in unique_sources.values()]          
+        for citation in citation_list:
+            st.markdown(citation)
     st.session_state.eta_messages.append({"role": "assistant", "content": full_response})
+    st.session_state.eta_messages.append({"role": "assistant", "content": citation_list})

@@ -8,11 +8,11 @@ Current:
 - Session for chat history
 - Cookie for UUID
 - Postgres for Chat Summary
+- Web Scrapping for knowledge
 
 Planning:
 1. Fine-tuning for Manglish
 2. Collect data/ Web Scrapping for knowledge base and latest answer
-3. Postgres for User Preference(maybe no need...?)
 
 Overall:
 1. No login required (Anonymous User)

@@ -202,14 +202,14 @@ def format_chat_history(messages, limit=6):
         if m["role"] in ("user", "assistant")
     )
 ### Similarity Search ###
-SIMILARITY_THRESHOLD = 0.6 # 0.3-0.6 ==> near-->far
+SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || bad -- good
 def retrieve_with_score(query, k=3):
     results = vectorstore.similarity_search_with_score(query, k=k)
 
     good_docs = []
     for doc, score in results:
         print(f"[DEBUG] Similarity score: {score}")
-        if score < SIMILARITY_THRESHOLD:
+        if score > SIMILARITY_THRESHOLD:
             good_docs.append(doc)
 
     return good_docs, results

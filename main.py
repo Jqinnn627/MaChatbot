@@ -15,8 +15,8 @@ from langchain_core.documents import Document
 # Library for Model in Hugging Face
 # from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# PostgreSQL
-import psycopg
+# MySQL using local XAMPP
+from sqlalchemy import text
 
 # UUID
 from streamlit_cookies_manager import EncryptedCookieManager
@@ -37,20 +37,18 @@ splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=150
 )
 
-# ini Database
-def get_db_conn():
-    return psycopg.connect(
-        dbname="user_db",
-        user="postgres",
-        password="postgre",
-        host="localhost",
-        port=5432
-    )
+# init postgre database
+# def get_db_conn():
+#     return psycopg.connect(
+#         dbname="user_db",
+#         user="postgres",
+#         password="postgre",
+#         host="localhost",
+#         port=5432
+#     )
 
-#List to hold components
-context_texts = []
-source_metadata_list = []
-source_counter = 1
+# init connection mysql
+conn = st.connection('mysql', type='sql')
 
 #OpenAI/LangChain/Pinecone
 #pinecone spec
@@ -129,8 +127,8 @@ summary_assistant = summary_prompt | llm
 retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
 
 ###########################################
-#           Stop because useless            
-#                                     
+#           Discontinued                  #
+#                                         #
 ###########################################
 # Let the result has Malaysian slang, Manglish :)
 # A fine tuned llama model made by mesolitica
@@ -149,25 +147,30 @@ retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
 # tokenizer, malaysian_model = load_malaysian_llama()
 
 # A function to create user record
+# Through ... ,:a/:b/:c (bind params) can be random alphabet(?)
 def ensure_user_exists(user_id):
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO user_profile (user_id, preferences, chat_summary)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (user_id) DO NOTHING
-            """, (user_id, [], ""))
+    query = text("INSERT IGNORE INTO user (user_id, chat_summary) VALUES (:id, :summ)")
+    with conn.session as session:
+        session.execute(
+            query,
+            {
+                "id": user_id, 
+                "summ": ""
+            }
+        )
+        session.commit()
 # A function to get previous summary on user id
 def fetch_chat_summary(user_id):
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT chat_summary
-                FROM user_profile
-                WHERE user_id = %s
-            """, (user_id,))
-            row = cur.fetchone()
-            return row[0] if row and row[0] else ""
+    query = "SELECT chat_summary FROM user WHERE user_id = :id"
+
+    # return a dataframe
+    result = conn.query(query, params={"id": user_id}, ttl=0)
+
+    if not result.empty:
+        summary = result.iloc[0]["chat_summary"]
+        return summary if summary else ""
+    
+    return ""
 # Function to store chat summary every session
 def generate_session_summary(messages):
     text = "\n".join(
@@ -180,19 +183,20 @@ def generate_session_summary(messages):
     
     return f"- User discussed: {chat_summary.content}"
 # Function to save summary to DB(Postgres)
-def save_summary(user_id, session_messages):
+def save_summary(user_id, session_messages, previous_chat_summary):
     session_summary = generate_session_summary(session_messages)
-    print("session_summary in Save Summary function.")
+    summary = previous_chat_summary + session_summary
+    query = "UPDATE user_profile SET chat_summary = :summ, last_seen = NOW() WHERE user_id = :id"
 
-    with get_db_conn() as conn:
-        with conn.cursor() as cur:
-            print("Debug: Saving now")
-            cur.execute("""
-                UPDATE user_profile
-                SET chat_summary = COALESCE(chat_summary, '') || E'\n' || %s,
-                    last_seen = NOW()
-                WHERE user_id = %s
-            """, (session_summary, user_id))
+    with conn.session as session:
+        print("Debug: Saving now")
+        session.execute(query,
+            {
+                "summ": summary,
+                "id": user_id
+            }
+        )
+        session.commit()
 # Use last 6 messages
 def format_chat_history(messages, limit=6):
     history = messages[-limit:]
@@ -218,7 +222,7 @@ def search_trusted_sources(query):
     url = f"https://s.jina.ai/?q={query}"
     headers = {
         "Accept": "application/json",
-        "Authorization": "Bearer jina_fd1a6ae50f6a46bbb61b791afc92fb2eZfRzQuxVNzPm53X1vqXREqeDJqNB",
+        "Authorization": f"Bearer {os.getenv("JIRA_AI_API_KEY")}",
         "X-Respond-With": "no-content"
     }
 
@@ -407,9 +411,9 @@ if prompt := st.chat_input("I want to..."):
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]
     time_passed = Messagenow - st.session_state.last_summary_time
 
-    if time_passed >= timedelta(minutes=30) and len(new_messages) > 0:
+    if time_passed >= timedelta(minutes=10) and len(new_messages) > 0:
         print("Conditions met! Calling save_summary...")
-        save_summary(user_id, new_messages)
+        save_summary(user_id, new_messages, chat_summary)
         st.session_state.last_summary_time = Messagenow
         st.session_state.last_summarized_len = len(st.session_state.messages)
     else:

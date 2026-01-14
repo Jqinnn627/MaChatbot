@@ -11,7 +11,7 @@ Current:
 - Web Scrapping for knowledge
 
 Planning:
-1. Fine-tuning for Manglish
+1. Fine-tuning for Manglish (SFT/ORPO)
 2. Collect data/ Web Scrapping for knowledge base and latest answer
 
 Overall:
@@ -19,6 +19,3 @@ Overall:
 2. One chatroom for one user
 3. New user record with UUID saved to DB
 4. The LLM have chat summary memory and chat history(-6)
-
-Problem:
-1. If DB got relevant info, llm just rely on it :)

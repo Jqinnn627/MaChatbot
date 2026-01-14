@@ -12,10 +12,7 @@ from dotenv import load_dotenv
 from langchain_core.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from langchain_core.documents import Document
 
-# Library for Model in Hugging Face
-# from transformers import AutoTokenizer, AutoModelForCausalLM
-
-# MySQL using local XAMPP
+# MySQL / local XAMPP
 from sqlalchemy import text
 
 # UUID
@@ -27,7 +24,10 @@ import pytz
 # Web Scrapping
 from bs4 import BeautifulSoup
 import requests
-from urllib.parse import urlparse, urlencode
+
+#Pretrained-Model
+from peft import AutoPeftModelForCausalLM
+from transformers import AutoTokenizer
 
 # Load Credential
 load_dotenv()
@@ -37,18 +37,20 @@ splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=150
 )
 
-# init postgre database
-# def get_db_conn():
-#     return psycopg.connect(
-#         dbname="user_db",
-#         user="postgres",
-#         password="postgre",
-#         host="localhost",
-#         port=5432
-#     )
-
 # init connection mysql
 conn = st.connection('mysql', type='sql')
+
+# # Import fine tuned LLM [Try with another devices with GPU > 15Gb :)]
+# @st.cache_resource
+# def load_fine_tuned_model():
+#     model = AutoPeftModelForCausalLM.from_pretrained(
+#         "manglish_model",
+#         load_in_4bit = True,
+#     )
+#     tokenizer = AutoTokenizer.from_pretrained("manglish_model")
+#     return model, tokenizer
+
+# model, tokenizer = load_fine_tuned_model()
 
 #OpenAI/LangChain/Pinecone
 #pinecone spec
@@ -68,8 +70,7 @@ vectorstore = PineconeVectorStore.from_existing_index(
 #!--Build LLM--
 ##prompt engineering
 system_prompt = SystemMessagePromptTemplate.from_template('''
-    You are a helpful assistance designed for Malaysia user
-    You are an AI assistant that communicates in a Malaysian-style tone: casual, local (Manglish), but still clear and professional.  
+    You are a helpful assistance.
     Always give accurate answers and logical reasoning.
     If information comes from retrieved documents, rely on them strictly.
     If unsure, you can provide your own opinion and provide them the keyword to google search online.
@@ -126,39 +127,22 @@ summary_assistant = summary_prompt | llm
 #Result
 retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
 
-###########################################
-#           Discontinued                  #
-#                                         #
-###########################################
-# Let the result has Malaysian slang, Manglish :)
-# A fine tuned llama model made by mesolitica
-# model_id = "mesolitica/Malaysian-Llama-3.2-1B-Instruct"
-
-# @st.cache_resource
-# def load_malaysian_llama():
-#     tokenizer = AutoTokenizer.from_pretrained(model_id)
-#     model = AutoModelForCausalLM.from_pretrained(
-#         model_id,
-#         device_map={"": "cpu"},
-#         dtype="float32"
-#     )
-#     return tokenizer, model
-
-# tokenizer, malaysian_model = load_malaysian_llama()
-
 # A function to create user record
 # Through ... ,:a/:b/:c (bind params) can be random alphabet(?)
 def ensure_user_exists(user_id):
-    query = text("INSERT IGNORE INTO user (user_id, chat_summary) VALUES (:id, :summ)")
-    with conn.session as session:
-        session.execute(
-            query,
-            {
-                "id": user_id, 
-                "summ": ""
-            }
-        )
-        session.commit()
+    queryChecker = "SELECT * FROM user WHERE user_id = :id" #check if user exist
+    result = conn.query(queryChecker, params={"id": user_id}, ttl=0)
+    if result.empty:
+        query = text("INSERT INTO user (user_id, chat_summary) VALUES (:id, :summ)")
+        with conn.session as session:
+            session.execute(
+                query,
+                {
+                    "id": user_id, 
+                    "summ": ""
+                }
+            )
+            session.commit()
 # A function to get previous summary on user id
 def fetch_chat_summary(user_id):
     query = "SELECT chat_summary FROM user WHERE user_id = :id"
@@ -186,7 +170,7 @@ def generate_session_summary(messages):
 def save_summary(user_id, session_messages, previous_chat_summary):
     session_summary = generate_session_summary(session_messages)
     summary = previous_chat_summary + session_summary
-    query = "UPDATE user_profile SET chat_summary = :summ, last_seen = NOW() WHERE user_id = :id"
+    query = text("UPDATE user SET chat_summary = :summ, last_seen = NOW() WHERE user_id = :id")
 
     with conn.session as session:
         print("Debug: Saving now")
@@ -206,7 +190,7 @@ def format_chat_history(messages, limit=6):
         if m["role"] in ("user", "assistant")
     )
 ### Similarity Search ###
-SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || bad -- good
+SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant
 def retrieve_with_score(query, k=3):
     results = vectorstore.similarity_search_with_score(query, k=k)
 
@@ -276,6 +260,20 @@ def rewrite_query(query):
         {query}
     """
     return llm.invoke(prompt).content.strip()
+
+def manglish_response(context):
+    url = "https://tabatha-bribeable-gena.ngrok-free.dev/generate"
+
+    payload = {
+        "query": context,
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        return True, resp.json()["response"]
+    except requests.exceptions.RequestException as e:
+        return False, f"Request failed: {e}"
 
 
 #<!----- UI???----->
@@ -377,47 +375,46 @@ if prompt := st.chat_input("I want to..."):
                     "chat_summary": chat_summary
                 })
 
-
-        # inputs = tokenizer(ans_rag['answer'], return_tensors="pt")
-        # outputs = malaysian_model.generate(
-        #     **inputs,
-        #     max_new_tokens=100,
-        #     eos_token_id = tokenizer.eos_token_id,
-        #     do_sample=True,
-        #     temperature=0.7
-        # )
-
     # Display assistant response in chat message container
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response = ""
-        # assistant_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        used_reponse = ""
+        isFlag = False #Defalut assistant_response
         if isinstance(ans_rag, dict):
             assistant_response = ans_rag.get('answer', str(ans_rag))
-            context_docs = ans_rag.get('context', [])
+            print("LLM1: ", assistant_response)
+            print("LLM2 on duty!")
+            isFlag, final_response = manglish_response(assistant_response)
         else:
-            # If it's just a string, use it directly
+            # If string, use it directly
             assistant_response = ans_rag
-            context_docs = []
-        for chunk in assistant_response.split():
-            full_response += chunk + " "
-            time.sleep(0.05)
-            message_placeholder.markdown(full_response + "▌")
-        message_placeholder.markdown(full_response)
+            print("LLM1: ", assistant_response)
+            print("LLM2 on duty!")
+            isFlag, final_response = manglish_response(assistant_response)
+        
+        if (isFlag == True):
+            used_response = final_response
+            print("LLM2: ", final_response)
+        else:
+            used_response = assistant_response
 
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+        for chunk in used_response.split():
+            used_response += chunk + " "
+            time.sleep(0.05)
+            message_placeholder.markdown(used_response + "▌")
+        message_placeholder.markdown(used_response)
+
+    st.session_state.messages.append({"role": "assistant", "content": used_response})
 
     print("End of process, now backend")
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]
     time_passed = Messagenow - st.session_state.last_summary_time
 
-    if time_passed >= timedelta(minutes=10) and len(new_messages) > 0:
+    if time_passed >= timedelta(minutes=1) and len(new_messages) > 0:
         print("Conditions met! Calling save_summary...")
         save_summary(user_id, new_messages, chat_summary)
         st.session_state.last_summary_time = Messagenow
         st.session_state.last_summarized_len = len(st.session_state.messages)
     else:
         print("Conditions NOT met. Skipping summary.")
-
-
-

@@ -6,3 +6,11 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+venv_cuda/
+unsloth_compiled_cache/
+manglish_model/
+
+# zip file for model
+manglish_model_orpo.zip
+manglish_model_re_tuned_3.zip
+manglish_model_sft.zip

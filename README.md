@@ -19,3 +19,5 @@ Overall:
 2. One chatroom for one user
 3. New user record with UUID saved to DB
 4. The LLM have chat summary memory and chat history(-6)
+
+# run pip install -r requirements.tzt to get dependencies :D

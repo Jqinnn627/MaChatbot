@@ -37,6 +37,20 @@ splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=150
 )
 
+GREETING_KW = {
+    "hi", "hello", "hey", "yo", "sup", "morning",
+    "evening", "afternoon", "hai", "helo", "hello ah"
+}
+
+LEAVING_KW = {
+    "bye", "byebye", "goodbye", "see you",
+    "later", "gtg", "exit", "quit"
+}
+
+QUESTION_WORDS = {"what", "why", "how", "when", "where", "who"}
+ACTION_WORDS = {"recommend", "explain", "tell", "show", "find"}
+
+
 # init connection mysql
 conn = st.connection('mysql', type='sql')
 
@@ -86,7 +100,8 @@ human_prompt = HumanMessagePromptTemplate.from_template('''
     Answer the question using the following context, if user ask about previous question, check for chat history and chat summary:
     {context}
 
-    Question: {input}
+    Question: 
+    {input}
     '''
 )
 
@@ -274,6 +289,46 @@ def manglish_response(context):
         return True, resp.json()["response"]
     except requests.exceptions.RequestException as e:
         return False, f"Request failed: {e}"
+    
+def keyword_intent(text):
+    t = text.lower()
+    if any(k in t for k in GREETING_KW):
+        return "greeting"
+    if any(k in t for k in LEAVING_KW):
+        return "bye"
+    return None
+
+def heuristic_intent(text):
+    words = text.lower().split()
+
+    # Extremely short + no intent words → greeting
+    if len(words) <= 3:
+        if not any(w in QUESTION_WORDS for w in words):
+            if not any(w in ACTION_WORDS for w in words):
+                return "greeting"
+
+    return None
+
+def llm_intent_fallback(text):
+    prompt = f"""
+    Classify the message into ONE label:
+    - greeting
+    - goodbye
+    - question
+
+    Message: "{text}"
+    Only output the label.
+    """
+    return llm.invoke(prompt).strip().lower()
+
+def detect_intent(text):
+    for fn in [keyword_intent, heuristic_intent]:
+        intent = fn(text)
+        if intent:
+            return intent
+
+    # last resort
+    return llm_intent_fallback(text)
 
 
 #<!----- UI???----->
@@ -322,90 +377,102 @@ if prompt := st.chat_input("I want to..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     chat_history = format_chat_history(st.session_state.messages)
+    used_reponse = ""
     # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(prompt)
         
-        # Simplify searching (trying, bad then bye)
-        search_query = rewrite_query(prompt)
-        print(search_query)
-        # checking similarity score
-        docs, raw_scores = retrieve_with_score(search_query)
+        intent = detect_intent(prompt)
+        #If greeting no need to process(?)
+        if intent == "greeting":
+            used_reponse = llm.invoke(
+                "Reply naturally in Manglish to a greeting."
+            )
+        elif intent == "goodbye":
+            used_reponse = llm.invoke(
+                "Reply naturally in Manglish to say goodbye."
+            )
+        else: # question
+            # Simplify searching
+            search_query = rewrite_query(prompt)
+            print(search_query)
 
-        # If Pinecone has good knowledge
-        if len(docs) > 0:
-            ans_rag = combine_docs_chain.invoke({
-                "input": search_query,
-                "context": docs,
-                "chat_history": chat_history,
-                "chat_summary": chat_summary
-            })
+            # checking similarity score
+            docs, raw_scores = retrieve_with_score(search_query)
 
-        # Pinecone empty / low confidence → web fallback
-        else:
-            st.warning("Getting from trusted sources…")
-
-            urls = search_trusted_sources(search_query)
-            web_texts = []
-
-            for url in urls:
-                doc = fetch_document(url)
-                if doc:
-                    web_texts.extend(doc)
-
-                    # Store into Pinecone for future
-                    vectorstore.add_documents(doc)
-                    #Debug if info stored
-                    print(vectorstore._index.describe_index_stats())
-
-
-            if len(web_texts) == 0:
-                ans_rag = {
-                    "answer": (
-                        "Sorry ah, I couldn't find reliable info. "
-                        "Try search keywords like: " + search_query
-                    ),
-                    "context": []
-                }
-            else:
+            # If Pinecone has good knowledge
+            if len(docs) > 0:
                 ans_rag = combine_docs_chain.invoke({
                     "input": search_query,
-                    "context": web_texts,
+                    "context": docs,
                     "chat_history": chat_history,
                     "chat_summary": chat_summary
                 })
 
-    # Display assistant response in chat message container
+            # Pinecone empty / low confidence → web fallback
+            else:
+                st.warning("Getting from trusted sources…")
+
+                urls = search_trusted_sources(search_query)
+                web_texts = []
+
+                for url in urls:
+                    doc = fetch_document(url)
+                    if doc:
+                        web_texts.extend(doc)
+
+                        # Store into Pinecone for future
+                        vectorstore.add_documents(doc)
+                        #Debug if info stored
+                        print(vectorstore._index.describe_index_stats())
+
+
+                if len(web_texts) == 0:
+                    ans_rag = {
+                        "answer": (
+                            "Sorry ah, I couldn't find reliable info. "
+                            "Try search keywords like: " + search_query
+                        ),
+                        "context": []
+                    }
+                else:
+                    ans_rag = combine_docs_chain.invoke({
+                        "input": search_query,
+                        "context": web_texts,
+                        "chat_history": chat_history,
+                        "chat_summary": chat_summary
+                    })
+                
+                isFlag = False #Defalut assistant_response
+                if isinstance(ans_rag, dict):
+                    assistant_response = ans_rag.get('answer', str(ans_rag))
+                    print("LLM1: ", assistant_response)
+                    print("LLM2 on duty!")
+                    isFlag, final_response = manglish_response(assistant_response) # if error return false
+                else:
+                    # If string, use it directly
+                    assistant_response = ans_rag
+                    print("LLM1: ", assistant_response)
+                    print("LLM2 on duty!")
+                    isFlag, final_response = manglish_response(assistant_response)
+                
+                if (isFlag == True): # true: final_response | false: assistant_response
+                    used_response = final_response
+                    print("LLM2: ", final_response)
+                else:
+                    used_response = assistant_response
+
+        # Display assistant response in chat message container
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        full_response = ""
-        used_reponse = ""
-        isFlag = False #Defalut assistant_response
-        if isinstance(ans_rag, dict):
-            assistant_response = ans_rag.get('answer', str(ans_rag))
-            print("LLM1: ", assistant_response)
-            print("LLM2 on duty!")
-            isFlag, final_response = manglish_response(assistant_response)
-        else:
-            # If string, use it directly
-            assistant_response = ans_rag
-            print("LLM1: ", assistant_response)
-            print("LLM2 on duty!")
-            isFlag, final_response = manglish_response(assistant_response)
-        
-        if (isFlag == True):
-            used_response = final_response
-            print("LLM2: ", final_response)
-        else:
-            used_response = assistant_response
 
         for chunk in used_response.split():
             used_response += chunk + " "
             time.sleep(0.05)
             message_placeholder.markdown(used_response + "▌")
-        message_placeholder.markdown(used_response)
 
-    st.session_state.messages.append({"role": "assistant", "content": used_response})
+        message_placeholder.markdown(used_response)
+        st.session_state.messages.append({"role": "assistant", "content": used_response})
 
     print("End of process, now backend")
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]

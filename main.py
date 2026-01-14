@@ -54,18 +54,6 @@ ACTION_WORDS = {"recommend", "explain", "tell", "show", "find"}
 # init connection mysql
 conn = st.connection('mysql', type='sql')
 
-# # Import fine tuned LLM [Try with another devices with GPU > 15Gb :)]
-# @st.cache_resource
-# def load_fine_tuned_model():
-#     model = AutoPeftModelForCausalLM.from_pretrained(
-#         "manglish_model",
-#         load_in_4bit = True,
-#     )
-#     tokenizer = AutoTokenizer.from_pretrained("manglish_model")
-#     return model, tokenizer
-
-# model, tokenizer = load_fine_tuned_model()
-
 #OpenAI/LangChain/Pinecone
 #pinecone spec
 model_name = 'multilingual-e5-large'
@@ -143,7 +131,6 @@ summary_assistant = summary_prompt | llm
 retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
 
 # A function to create user record
-# Through ... ,:a/:b/:c (bind params) can be random alphabet(?)
 def ensure_user_exists(user_id):
     queryChecker = "SELECT * FROM user WHERE user_id = :id" #check if user exist
     result = conn.query(queryChecker, params={"id": user_id}, ttl=0)
@@ -288,6 +275,7 @@ def manglish_response(context):
         resp.raise_for_status()
         return True, resp.json()["response"]
     except requests.exceptions.RequestException as e:
+        print(f"[DEBUG] {e}")
         return False, f"Request failed: {e}"
     
 def keyword_intent(text):
@@ -295,31 +283,31 @@ def keyword_intent(text):
     if any(k in t for k in GREETING_KW):
         return "greeting"
     if any(k in t for k in LEAVING_KW):
-        return "bye"
+        return "goodbye"
     return None
 
 def heuristic_intent(text):
     words = text.lower().split()
 
     # Extremely short + no intent words → greeting
-    if len(words) <= 3:
+    if len(words) <= 1:
         if not any(w in QUESTION_WORDS for w in words):
             if not any(w in ACTION_WORDS for w in words):
                 return "greeting"
 
     return None
 
-def llm_intent_fallback(text):
-    prompt = f"""
-    Classify the message into ONE label:
-    - greeting
-    - goodbye
-    - question
+# def llm_intent_fallback(text):
+#     prompt = f"""
+#     Classify the message into ONE label:
+#     - greeting
+#     - goodbye
+#     - question
 
-    Message: "{text}"
-    Only output the label.
-    """
-    return llm.invoke(prompt).strip().lower()
+#     Message: "{text}"
+#     Only output the label.
+#     """
+#     return llm.invoke(prompt).content.lower()
 
 def detect_intent(text):
     for fn in [keyword_intent, heuristic_intent]:
@@ -328,7 +316,9 @@ def detect_intent(text):
             return intent
 
     # last resort
-    return llm_intent_fallback(text)
+    print("[DEBUG] Intent Fallback")
+    # return llm_intent_fallback(text)
+    return "others"
 
 
 #<!----- UI???----->
@@ -377,23 +367,29 @@ if prompt := st.chat_input("I want to..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     chat_history = format_chat_history(st.session_state.messages)
-    used_reponse = ""
+    used_response = ""
     # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(prompt)
         
         intent = detect_intent(prompt)
+        print("Content detected: ", intent)
         #If greeting no need to process(?)
         if intent == "greeting":
-            used_reponse = llm.invoke(
+            print("[DEBUG] GREETING")
+            response = llm.invoke(
                 "Reply naturally in Manglish to a greeting."
             )
+            used_response = response.content
         elif intent == "goodbye":
-            used_reponse = llm.invoke(
+            print("[DEBUG] LEAVING")
+            response = llm.invoke(
                 "Reply naturally in Manglish to say goodbye."
             )
+            used_response = response.content
         else: # question
             # Simplify searching
+            print("[DEBUG] NORMAL CONVERSATION")
             search_query = rewrite_query(prompt)
             print(search_query)
 
@@ -402,6 +398,7 @@ if prompt := st.chat_input("I want to..."):
 
             # If Pinecone has good knowledge
             if len(docs) > 0:
+                print("[DEBUG] DOCUMENT EXIST")
                 ans_rag = combine_docs_chain.invoke({
                     "input": search_query,
                     "context": docs,
@@ -409,7 +406,7 @@ if prompt := st.chat_input("I want to..."):
                     "chat_summary": chat_summary
                 })
 
-            # Pinecone empty / low confidence → web fallback
+            # Pinecone empty / low confidence → web scraping
             else:
                 st.warning("Getting from trusted sources…")
 
@@ -442,37 +439,42 @@ if prompt := st.chat_input("I want to..."):
                         "chat_history": chat_history,
                         "chat_summary": chat_summary
                     })
+                # End of web scraping
                 
-                isFlag = False #Defalut assistant_response
-                if isinstance(ans_rag, dict):
-                    assistant_response = ans_rag.get('answer', str(ans_rag))
-                    print("LLM1: ", assistant_response)
-                    print("LLM2 on duty!")
-                    isFlag, final_response = manglish_response(assistant_response) # if error return false
-                else:
-                    # If string, use it directly
-                    assistant_response = ans_rag
-                    print("LLM1: ", assistant_response)
-                    print("LLM2 on duty!")
-                    isFlag, final_response = manglish_response(assistant_response)
+            isFlag = False #Defalut assistant_response
+
+            if isinstance(ans_rag, dict):
+                assistant_response = ans_rag.get('answer', str(ans_rag))
+                print("Assistant_response: ", assistant_response)
+                print("LLM2 on duty!")
+                isFlag, final_response = manglish_response(assistant_response) # if error return false
+                print("[DEBUG] FLAG: ", isFlag)
+            else:
+                # If string, use it directly
+                assistant_response = ans_rag
+                print("LLM1: ", assistant_response)
+                print("LLM2 on duty!")
+                isFlag, final_response = manglish_response(assistant_response)
+                print("[DEBUG] FLAG: ", isFlag)
                 
-                if (isFlag == True): # true: final_response | false: assistant_response
-                    used_response = final_response
-                    print("LLM2: ", final_response)
-                else:
-                    used_response = assistant_response
+            if (isFlag == True): # true: final_response | false: assistant_response
+                used_response = final_response
+                print("LLM2: ", final_response)
+            else:
+                used_response = assistant_response
 
         # Display assistant response in chat message container
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
+        streamed_text = ""
 
         for chunk in used_response.split():
-            used_response += chunk + " "
+            streamed_text += chunk + " "
             time.sleep(0.05)
-            message_placeholder.markdown(used_response + "▌")
+            message_placeholder.markdown(streamed_text + "▌")
 
-        message_placeholder.markdown(used_response)
-        st.session_state.messages.append({"role": "assistant", "content": used_response})
+        message_placeholder.markdown(streamed_text)
+        st.session_state.messages.append({"role": "assistant", "content": streamed_text})
 
     print("End of process, now backend")
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]

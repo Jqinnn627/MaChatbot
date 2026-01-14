@@ -228,7 +228,7 @@ def search_trusted_sources(query):
     data = response.json()
 
     links = []
-    for a in data.get("data", [])[:5]:
+    for a in data.get("data", [])[:5]: # use 1st 5 links
         links.append(a["url"])
     return links
 
@@ -311,7 +311,6 @@ def detect_intent(text):
             return intent
 
     return "others"
-
 
 #<!----- UI???----->
 st.title("Chatbot")
@@ -462,12 +461,14 @@ if prompt := st.chat_input("I would like to..."):
         message_placeholder.markdown(streamed_text)
         st.session_state.messages.append({"role": "assistant", "content": streamed_text})
 
+    #Summarize conversation of user
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]
     time_passed = Messagenow - st.session_state.last_summary_time
 
-    if time_passed >= timedelta(minutes=1) and len(new_messages) > 0:
+    # If condition met, perform; else skip;
+    if time_passed >= timedelta(minutes=5) and len(new_messages) > 0:
         save_summary(user_id, new_messages, chat_summary)
         st.session_state.last_summary_time = Messagenow
         st.session_state.last_summarized_len = len(st.session_state.messages)
     else:
-        None
+        None #Skip

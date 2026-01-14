@@ -49,15 +49,6 @@ LEAVING_KW = {
     "later", "gtg", "exit", "quit"
 }
 
-QUESTION_WORDS = {
-    "what", "wat", "why", "how", "where", "when",
-    "which", "who", "meh", "ah", "or", "?"
-}
-ACTION_WORDS = {
-    "eat", "go", "find", "buy", "do", "make",
-    "recommend", "suggest", "help", "order"
-}
-
 ACK_PATTERNS = [
     r"^ok+$",        
     r"^ok\s*ok+$",   
@@ -91,6 +82,7 @@ vectorstore = PineconeVectorStore.from_existing_index(
 ##prompt engineering
 system_prompt = SystemMessagePromptTemplate.from_template('''
     You are a helpful assistance.
+    You are an AI assistant that communicates in a Malaysian-style tone: casual, slightly local (Manglish), but still clear and professional.
     Always give accurate answers and logical reasoning.
     If information comes from retrieved documents, rely on them strictly.
     If unsure, you can provide your own opinion and provide them the keyword to google search online.
@@ -304,16 +296,6 @@ def keyword_intent(text):
         return "goodbye"
     return None
 
-def heuristic_intent(text):
-    words = text.lower().split()
-
-    if len(words) <= 1:
-        if not any(w in QUESTION_WORDS for w in words):
-            if not any(w in ACTION_WORDS for w in words):
-                return "others"
-
-    return None
-
 def ack_intent(text: str) -> bool:
     t = text.lower().strip()
     for p in ACK_PATTERNS:
@@ -322,7 +304,7 @@ def ack_intent(text: str) -> bool:
     return None
 
 def detect_intent(text):
-    for fn in [ack_intent, keyword_intent, heuristic_intent]:
+    for fn in [ack_intent, keyword_intent]:
         intent = fn(text)
         if intent:
             return intent

@@ -25,10 +25,7 @@ import pytz
 from bs4 import BeautifulSoup
 import requests
 
-#Pretrained-Model
-from peft import AutoPeftModelForCausalLM
-from transformers import AutoTokenizer
-
+#Regular Expression
 import re
 
 # Load Credential
@@ -39,16 +36,19 @@ splitter = RecursiveCharacterTextSplitter(
     chunk_overlap=150
 )
 
+# Greeting
 GREETING_KW = {
     "hi", "hello", "hey", "yo", "sup", "morning",
     "evening", "afternoon", "hai", "helo", "hello ah"
 }
 
+# Goodbye
 LEAVING_KW = {
     "bye", "byebye", "goodbye", "see you",
     "later", "gtg", "exit", "quit"
 }
 
+# Ok/ Oh/ Eh/...
 ACK_PATTERNS = [
     r"^ok+$",        
     r"^ok\s*ok+$",   
@@ -117,6 +117,7 @@ storage_human_prompt = HumanMessagePromptTemplate.from_template('''
     {text}
 ''')
 
+# Combine them
 chat_prompt = ChatPromptTemplate.from_messages([system_prompt, human_prompt])
 summary_prompt = ChatPromptTemplate.from_messages([storage_system_prompt, storage_human_prompt])
 
@@ -186,7 +187,6 @@ def save_summary(user_id, session_messages, previous_chat_summary):
     query = text("UPDATE user SET chat_summary = :summ, last_seen = NOW() WHERE user_id = :id")
 
     with conn.session as session:
-        print("Debug: Saving now")
         session.execute(query,
             {
                 "summ": summary,
@@ -194,7 +194,7 @@ def save_summary(user_id, session_messages, previous_chat_summary):
             }
         )
         session.commit()
-# Use last 6 messages
+# Use last 6 messages as previous chat, parse into chatgpt
 def format_chat_history(messages, limit=6):
     history = messages[-limit:]
     return "\n".join(
@@ -202,19 +202,20 @@ def format_chat_history(messages, limit=6):
         for m in history
         if m["role"] in ("user", "assistant")
     )
-### Similarity Search ###
+
+# Similarity Search
 SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant
 def retrieve_with_score(query, k=3):
     results = vectorstore.similarity_search_with_score(query, k=k)
 
     good_docs = []
     for doc, score in results:
-        print(f"[DEBUG] Similarity score: {score}")
         if score > SIMILARITY_THRESHOLD:
             good_docs.append(doc)
 
     return good_docs, results
 
+# Jina API for online searching, it return data from trusted website 
 def search_trusted_sources(query):
     url = f"https://s.jina.ai/?q={query}"
     headers = {
@@ -225,15 +226,13 @@ def search_trusted_sources(query):
 
     response = requests.get(url, headers=headers, timeout=10)
     data = response.json()
-    print(f"response: {data}")
 
     links = []
     for a in data.get("data", [])[:5]:
         links.append(a["url"])
-
-    print(links)
     return links
 
+# extract data one by one from Jina API
 def fetch_document(url):
     try:
         r = requests.get(url, timeout=10)
@@ -258,10 +257,9 @@ def fetch_document(url):
         return docs
 
     except Exception as e:
-        print(f"Fetch failed {url}: {e}")
         return None
 
-#Simplify searching
+# Simplify searching (avoid too much token being used): Optional
 def rewrite_query(query):
     prompt = f"""
         Rewrite this question into a short factual search query.
@@ -273,6 +271,7 @@ def rewrite_query(query):
     """
     return llm.invoke(prompt).content.strip()
 
+# Temp solution: Run fastapi.py with fine tuned LLM in Google Colab, then get manglish response
 def manglish_response(context):
     url = "https://tabatha-bribeable-gena.ngrok-free.dev/generate"
 
@@ -285,9 +284,9 @@ def manglish_response(context):
         resp.raise_for_status()
         return True, resp.json()["response"]
     except requests.exceptions.RequestException as e:
-        print(f"[DEBUG] {e}")
         return False, f"Request failed: {e}"
     
+# See if user is greeting or leaving
 def keyword_intent(text):
     t = text.lower()
     if any(k in t for k in GREETING_KW):
@@ -296,6 +295,7 @@ def keyword_intent(text):
         return "goodbye"
     return None
 
+# Acknowledgement: Ohh/ Okok
 def ack_intent(text: str) -> bool:
     t = text.lower().strip()
     for p in ACK_PATTERNS:
@@ -303,6 +303,7 @@ def ack_intent(text: str) -> bool:
             return "ack"
     return None
 
+# Function to detect content; default "others"
 def detect_intent(text):
     for fn in [ack_intent, keyword_intent]:
         intent = fn(text)
@@ -324,22 +325,24 @@ cookies = EncryptedCookieManager(
 if not cookies.ready():
     st.stop()
 
-#store user_id in cookie
+#check if user_id exist in cookie
 if "user_id" not in cookies:
     cookies["user_id"] = str(uuid.uuid4())
     cookies.save()
 
 user_id = cookies["user_id"]
-ensure_user_exists(user_id)
+ensure_user_exists(user_id) #store to database(MySQL)
 
 #Fetch chat summary for current user
 chat_summary = fetch_chat_summary(user_id)
 
+# Used to check whether to store chat summary
 if "last_summary_time" not in st.session_state:
     st.session_state.last_summary_time = datetime.now(
         pytz.timezone("Asia/Kuala_Lumpur")
     )
 
+# If there is new message from user, summarize and store
 if "last_summarized_len" not in st.session_state:
     st.session_state.last_summarized_len = 0
 
@@ -354,7 +357,7 @@ for message in st.session_state.messages:
 
 Messagenow = datetime.now(pytz.timezone('Asia/Kuala_Lumpur'))
 # Accept user input
-if prompt := st.chat_input("I want to..."):
+if prompt := st.chat_input("I would like to..."):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     chat_history = format_chat_history(st.session_state.messages)
@@ -363,36 +366,30 @@ if prompt := st.chat_input("I want to..."):
     with st.chat_message("user"):
         st.markdown(prompt)
         
+        # Check content type (greeting/leaving/ack/others)
         intent = detect_intent(prompt)
-        print("Content detected: ", intent)
-        #If greeting no need to process(?)
+
+        # If greeting/leaving/ack no need to process with full LLM [Add more in future if possible(?)]
         if intent == "greeting":
-            print("[DEBUG] GREETING")
             response = llm.invoke(
                 "Reply naturally in Manglish to a greeting."
             )
             used_response = response.content
         elif intent == "ack":
-            print("[DEBUG] Acknowledgement")
             used_response = "Yea"
         elif intent == "goodbye":
-            print("[DEBUG] LEAVING")
             response = llm.invoke(
                 "Reply naturally in Manglish to say goodbye."
             )
             used_response = response.content
         else: # question
             # Simplify searching
-            print("[DEBUG] NORMAL CONVERSATION")
             search_query = rewrite_query(prompt)
-            print(search_query)
-
             # checking similarity score
             docs, raw_scores = retrieve_with_score(search_query)
 
             # If Pinecone has good knowledge
             if len(docs) > 0:
-                print("[DEBUG] DOCUMENT EXIST")
                 ans_rag = combine_docs_chain.invoke({
                     "input": search_query,
                     "context": docs,
@@ -415,7 +412,6 @@ if prompt := st.chat_input("I want to..."):
                         # Store into Pinecone for future
                         vectorstore.add_documents(doc)
                         #Debug if info stored
-                        print(vectorstore._index.describe_index_stats())
 
 
                 if len(web_texts) == 0:
@@ -434,30 +430,26 @@ if prompt := st.chat_input("I want to..."):
                         "chat_summary": chat_summary
                     })
                 # End of web scraping
-                
-            isFlag = False #Defalut assistant_response
 
+            #Defalut assistant_response    
+            isFlag = False 
+
+            # Dictionary
             if isinstance(ans_rag, dict):
                 assistant_response = ans_rag.get('answer', str(ans_rag))
-                print("Assistant_response: ", assistant_response)
-                print("LLM2 on duty!")
                 isFlag, final_response = manglish_response(assistant_response) # if error return false
-                print("[DEBUG] FLAG: ", isFlag)
             else:
                 # If string, use it directly
                 assistant_response = ans_rag
-                print("LLM1: ", assistant_response)
-                print("LLM2 on duty!")
                 isFlag, final_response = manglish_response(assistant_response)
-                print("[DEBUG] FLAG: ", isFlag)
-                
-            if (isFlag == True): # true: final_response | false: assistant_response
+
+            # true: final_response | false: assistant_response    
+            if (isFlag == True):
                 used_response = final_response
-                print("LLM2: ", final_response)
             else:
                 used_response = assistant_response
 
-        # Display assistant response in chat message container
+    # Display assistant response in chat message container
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         streamed_text = ""
@@ -470,14 +462,12 @@ if prompt := st.chat_input("I want to..."):
         message_placeholder.markdown(streamed_text)
         st.session_state.messages.append({"role": "assistant", "content": streamed_text})
 
-    print("End of process, now backend")
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]
     time_passed = Messagenow - st.session_state.last_summary_time
 
     if time_passed >= timedelta(minutes=1) and len(new_messages) > 0:
-        print("Conditions met! Calling save_summary...")
         save_summary(user_id, new_messages, chat_summary)
         st.session_state.last_summary_time = Messagenow
         st.session_state.last_summarized_len = len(st.session_state.messages)
     else:
-        print("Conditions NOT met. Skipping summary.")
+        None

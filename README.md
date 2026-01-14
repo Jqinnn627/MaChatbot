@@ -26,5 +26,5 @@ Requirement:
 2. manglish_model_retuned_3 for Manglish (https://drive.google.com/file/d/1r9U4mX8vVnsW_O192yxlagt94OwX0U5E/view?usp=sharing)
 3. put fastapi.py and manglish model in Google Colab(for free GPU)
 
-# run pip install -r requirements.txt to get dependencies
-# fastapi.py is used to host Manglish LLM, require at least 6GB GPU or else CUDA out of memory
+##### run pip install -r requirements.txt to get dependencies
+##### fastapi.py is used to host Manglish LLM, require at least 6GB GPU or else CUDA out of memory

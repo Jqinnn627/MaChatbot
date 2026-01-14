@@ -1,4 +1,4 @@
-A LLM with Manglish
+A Chatbot with Manglish
 
 Current:
 - Langchain for RAG

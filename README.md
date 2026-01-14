@@ -20,4 +20,5 @@ Overall:
 3. New user record with UUID saved to DB
 4. The LLM have chat summary memory and chat history(-6)
 
-# run pip install -r requirements.tzt to get dependencies :D
+# run pip install -r requirements.txt to get dependencies
+# fastapi.py is used to host Inference LLM, require at least 6GB GPU or else CUDA out of memory

@@ -29,6 +29,8 @@ import requests
 from peft import AutoPeftModelForCausalLM
 from transformers import AutoTokenizer
 
+import re
+
 # Load Credential
 load_dotenv()
 
@@ -47,8 +49,24 @@ LEAVING_KW = {
     "later", "gtg", "exit", "quit"
 }
 
-QUESTION_WORDS = {"what", "why", "how", "when", "where", "who"}
-ACTION_WORDS = {"recommend", "explain", "tell", "show", "find"}
+QUESTION_WORDS = {
+    "what", "wat", "why", "how", "where", "when",
+    "which", "who", "meh", "ah", "or", "?"
+}
+ACTION_WORDS = {
+    "eat", "go", "find", "buy", "do", "make",
+    "recommend", "suggest", "help", "order"
+}
+
+ACK_PATTERNS = [
+    r"^ok+$",        
+    r"^ok\s*ok+$",   
+    r"^oh+$",        
+    r"^ah+$",        
+    r"^eh+$",
+    r"^mm+$",
+    r"^hmm+$",
+]
 
 
 # init connection mysql
@@ -145,6 +163,7 @@ def ensure_user_exists(user_id):
                 }
             )
             session.commit()
+
 # A function to get previous summary on user id
 def fetch_chat_summary(user_id):
     query = "SELECT chat_summary FROM user WHERE user_id = :id"
@@ -244,7 +263,6 @@ def fetch_document(url):
             )
             for chunk in chunks
         ]
-
         return docs
 
     except Exception as e:
@@ -289,35 +307,26 @@ def keyword_intent(text):
 def heuristic_intent(text):
     words = text.lower().split()
 
-    # Extremely short + no intent words → greeting
     if len(words) <= 1:
         if not any(w in QUESTION_WORDS for w in words):
             if not any(w in ACTION_WORDS for w in words):
-                return "greeting"
+                return "others"
 
     return None
 
-# def llm_intent_fallback(text):
-#     prompt = f"""
-#     Classify the message into ONE label:
-#     - greeting
-#     - goodbye
-#     - question
-
-#     Message: "{text}"
-#     Only output the label.
-#     """
-#     return llm.invoke(prompt).content.lower()
+def ack_intent(text: str) -> bool:
+    t = text.lower().strip()
+    for p in ACK_PATTERNS:
+        if re.match(p, t):
+            return "ack"
+    return None
 
 def detect_intent(text):
-    for fn in [keyword_intent, heuristic_intent]:
+    for fn in [ack_intent, keyword_intent, heuristic_intent]:
         intent = fn(text)
         if intent:
             return intent
 
-    # last resort
-    print("[DEBUG] Intent Fallback")
-    # return llm_intent_fallback(text)
     return "others"
 
 
@@ -381,6 +390,9 @@ if prompt := st.chat_input("I want to..."):
                 "Reply naturally in Manglish to a greeting."
             )
             used_response = response.content
+        elif intent == "ack":
+            print("[DEBUG] Acknowledgement")
+            used_response = "Yea"
         elif intent == "goodbye":
             print("[DEBUG] LEAVING")
             response = llm.invoke(

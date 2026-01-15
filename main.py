@@ -83,6 +83,7 @@ vectorstore = PineconeVectorStore.from_existing_index(
 system_prompt = SystemMessagePromptTemplate.from_template('''
     You are a helpful assistance.
     Always give accurate answers and logical reasoning.
+    No need to ask user question unless require more information to search.
     If information comes from retrieved documents, rely on them strictly.
     If unsure, you can provide your own opinion and provide them the keyword to google search online.
 '''
@@ -285,6 +286,7 @@ def manglish_response(context):
     except requests.exceptions.RequestException as e:
         return False, f"Request failed: {e}"
 
+# Detect question
 def is_question(text):
     t = text.lower()
     if "?" in t:
@@ -448,10 +450,12 @@ if prompt := st.chat_input("I would like to..."):
             # Dictionary
             if isinstance(ans_rag, dict):
                 assistant_response = ans_rag.get('answer', str(ans_rag))
+                print(assistant_response)
                 isFlag, final_response = manglish_response(assistant_response) # if error return false
             else:
                 # If string, use it directly
                 assistant_response = ans_rag
+                print(assistant_response)
                 isFlag, final_response = manglish_response(assistant_response)
 
             # true: final_response | false: assistant_response    

@@ -57,7 +57,7 @@ def generate_text(request: GenerationRequest):
         	Example 3: "Wait for me." -> "Wait ah.
         	""", # Instruction
         	f"""{request.query}""", # Input
-        	"", # output - leave this blank 
+        	"", # output - leave this blank
     	)
 	], return_tensors = "pt").to("cuda")
 

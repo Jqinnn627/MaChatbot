@@ -1,4 +1,5 @@
-A Chatbot with Manglish
+# A Chatbot with Manglish
+Python env: 3.12
 
 Current:
 - Langchain for RAG

@@ -1,7 +1,24 @@
+# !unzip -o '/content/manglish_model_retuned_3.zip' -d '/manglish_model_retuned_3/'
+
+# %%capture
+# import os, re
+# if "COLAB_" not in "".join(os.environ.keys()):
+#     !pip install unsloth
+# else:
+#     # Do this only in Colab notebooks! Otherwise use pip install unsloth
+#     import torch; v = re.match(r"[0-9]{1,}\.[0-9]{1,}", str(torch.__version__)).group(0)
+#     xformers = "xformers==" + ("0.0.33.post1" if v=="2.9" else "0.0.32.post2" if v=="2.8" else "0.0.29.post3")
+#     !pip install --no-deps bitsandbytes accelerate {xformers} peft trl triton cut_cross_entropy unsloth_zoo
+#     !pip install sentencepiece protobuf "datasets==4.3.0" "huggingface_hub>=0.34.0" hf_transfer
+#     !pip install --no-deps unsloth
+# !pip install transformers==4.56.2
+# !pip install --no-deps trl==0.22.2
+# !pip install unsloth_zoo
+
+# %%writefile main.py (in colab)
 from fastapi import FastAPI
 from pydantic import BaseModel
 from unsloth import FastLanguageModel
-import torch
 
 app = FastAPI()
 
@@ -24,14 +41,10 @@ dtype = None
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="manglish_model_retuned_3",
     max_seq_length=4096,
-    dtype=dtype,
+    dtype=None,
     load_in_4bit=True,
 )
 FastLanguageModel.for_inference(model)
-
-@app.get("/health")
-def health():
-    return {"status": "14/1/2026 ok1"}
 
 @app.post("/generate")
 def generate_text(request: GenerationRequest):

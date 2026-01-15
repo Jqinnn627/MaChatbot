@@ -28,6 +28,9 @@ import requests
 #Regular Expression
 import re
 
+#Image 
+import base64
+
 # Load Credential
 load_dotenv()
 
@@ -41,13 +44,11 @@ GREETING_KW = {
     "hi", "hello", "hey", "yo", "sup", "morning",
     "evening", "afternoon", "hai", "helo", "hello ah"
 }
-
 # Goodbye
 LEAVING_KW = {
     "bye", "byebye", "goodbye", "see you",
     "later", "gtg", "exit", "quit"
 }
-
 # Ok/ Oh/ Eh/...
 ACK_PATTERNS = [
     r"^ok+$",        
@@ -58,7 +59,6 @@ ACK_PATTERNS = [
     r"^mm+$",
     r"^hmm+$",
 ]
-
 
 # init connection mysql
 conn = st.connection('mysql', type='sql')
@@ -156,7 +156,6 @@ def ensure_user_exists(user_id):
                 }
             )
             session.commit()
-
 # A function to get previous summary on user id
 def fetch_chat_summary(user_id):
     query = "SELECT chat_summary FROM user WHERE user_id = :id"
@@ -202,7 +201,6 @@ def format_chat_history(messages, limit=6):
         for m in history
         if m["role"] in ("user", "assistant")
     )
-
 # Similarity Search
 SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant
 def retrieve_with_score(query, k=3):
@@ -214,7 +212,6 @@ def retrieve_with_score(query, k=3):
             good_docs.append(doc)
 
     return good_docs, results
-
 # Jina API for online searching, it return data from trusted website 
 def search_trusted_sources(query):
     url = f"https://s.jina.ai/?q={query}"
@@ -231,7 +228,6 @@ def search_trusted_sources(query):
     for a in data.get("data", [])[:5]: # use 1st 5 links
         links.append(a["url"])
     return links
-
 # extract data one by one from Jina API
 def fetch_document(url):
     try:
@@ -258,7 +254,6 @@ def fetch_document(url):
 
     except Exception as e:
         return None
-
 # Simplify searching (avoid too much token being used): Optional
 def rewrite_query(query):
     prompt = f"""
@@ -270,7 +265,6 @@ def rewrite_query(query):
         {query}
     """
     return llm.invoke(prompt).content.strip()
-
 # Temp solution: Run fastapi.py with fine tuned LLM in Google Colab, then get manglish response
 def manglish_response(context):
     url = "https://tabatha-bribeable-gena.ngrok-free.dev/generate"
@@ -285,7 +279,6 @@ def manglish_response(context):
         return True, resp.json()["response"]
     except requests.exceptions.RequestException as e:
         return False, f"Request failed: {e}"
-
 # Detect question
 def is_question(text):
     t = text.lower()
@@ -294,7 +287,6 @@ def is_question(text):
     if t.startswith(("can", "could you", "please", "help", "what", "why", "when", "how", "where")):
         return True
     return False
-
 # See if user is greeting or leaving
 def keyword_intent(text):
     t = text.lower()
@@ -305,7 +297,6 @@ def keyword_intent(text):
         if re.search(rf"\b{k}\b", t):
             return "goodbye"
     return None
-
 # Acknowledgement: Ohh/ Okok
 def ack_intent(text: str) -> bool:
     t = text.lower().strip()
@@ -313,7 +304,6 @@ def ack_intent(text: str) -> bool:
         if re.match(p, t):
             return "ack"
     return None
-
 # Function to detect content; default "others"
 def detect_intent(text):
     if is_question(text):
@@ -325,9 +315,27 @@ def detect_intent(text):
             return intent
 
     return "others"
+#Process image
+def img_to_base64(path):
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode()
+# UI
+st.set_page_config(
+    layout="wide",
+    initial_sidebar_state="expanded",
+    page_icon="images/big-data.png",
+)
+img = img_to_base64("images/big-data.png")
 
-#<!----- UI???----->
-st.title("Chatbot")
+st.markdown(
+    f"""
+    <div style="display:flex; justify-content:center; align-items:center; gap:12px;">
+        <img src="data:image/png;base64,{img}" width="50">
+        <h1 style="margin:0; color:#E6E6FA">Chatbot</h1>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # Set cookie
 cookies = EncryptedCookieManager(
@@ -344,9 +352,9 @@ if "user_id" not in cookies:
     cookies.save()
 
 user_id = cookies["user_id"]
-ensure_user_exists(user_id) #store to database(MySQL)
+ensure_user_exists(user_id) # store to database(MySQL)
 
-#Fetch chat summary for current user
+# Fetch chat summary for current user
 chat_summary = fetch_chat_summary(user_id)
 
 # Used to check whether to store chat summary
@@ -359,14 +367,109 @@ if "last_summary_time" not in st.session_state:
 if "last_summarized_len" not in st.session_state:
     st.session_state.last_summarized_len = 0
 
-# Initialize chat history
+# CSS
+st.markdown("""
+<style>
+/*Chat container*/            
+.chat-container {
+    max-width: 900px;
+    margin: auto;
+}
+
+/* Chat bubble */
+.chat-bubble {
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    width: auto;
+    font-size: 16px;
+}
+
+/* Assistant */
+.assistant {
+    display: flex;
+    color: #E6E6FA;
+    justify-self: start;
+}
+/*Assitant icon background*/
+.st-emotion-cache-z68l0b{
+    background-color: #ffffff;
+}
+
+/* User */
+.user {
+    display: flex;
+    color: #E6E6FA;
+    justify-self: end;
+}
+
+/* User chatbot */
+.st-emotion-cache-khw9fs{
+    order:1;
+}
+            
+/* Body Background color*/
+.st-emotion-cache-13k62yr {
+    background: #310854;
+}
+
+/*User chat bubble background*/
+.st-emotion-cache-1mph9ef{
+    background-color:#1e0336;
+    width:auto;
+    max-width:70%;
+    align-self:end;
+}
+
+/*Bottom bar background color*/     
+.st-emotion-cache-1y34ygi{
+    background: #9370dB;
+}
+
+/* Chat row */
+.chat-row {
+    display: grid;
+}
+
+/* Text input background */
+.st-emotion-cache-1353z0o{
+	background-color: #6A0DAD;
+}
+/* Text input */
+.st-b1 {
+    background-color: #6A0DAD;
+}
+.st-emotion-cache-h3jt4q{
+    background-color: #6A0DAD;
+}
+
+.st-emotion-cache-1f3w014{
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Initialize chat history in session
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Let's start chatting! 👇"}]
+    st.session_state.messages = [{"role": "assistant", "content": "Hello World."}]
+
+st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
 
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        role_class = "assistant" if message["role"] == "assistant" else "user"
+        st.markdown(
+            f"""
+            <div class="chat-row">
+                <div class="chat-bubble {role_class}">
+                    {message["content"]}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+st.markdown("</div>", unsafe_allow_html=True)
 
 Messagenow = datetime.now(pytz.timezone('Asia/Kuala_Lumpur'))
 # Accept user input
@@ -376,8 +479,19 @@ if prompt := st.chat_input("I would like to..."):
     chat_history = format_chat_history(st.session_state.messages)
     used_response = ""
     # Display user message in chat message container
+    st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(
+            f"""
+            <div class="chat-row">
+                <div class="chat-bubble user">
+                    {prompt}
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
         
         # Check content type (greeting/leaving/ack/others)
         intent = detect_intent(prompt)
@@ -396,8 +510,12 @@ if prompt := st.chat_input("I would like to..."):
             )
             used_response = response.content
         else: # question
-            # Simplify searching
-            search_query = rewrite_query(prompt)
+            # Simplify searching if word more than 6
+            if len(prompt.split()) > 6:
+                search_query = rewrite_query(prompt)
+            else:
+                search_query = prompt
+
             # checking similarity score
             docs, raw_scores = retrieve_with_score(search_query)
 
@@ -424,7 +542,7 @@ if prompt := st.chat_input("I would like to..."):
 
                         # Store into Pinecone for future
                         vectorstore.add_documents(doc)
-                        #Debug if info stored
+                        # Debug if info stored
 
 
                 if len(web_texts) == 0:
@@ -444,7 +562,7 @@ if prompt := st.chat_input("I would like to..."):
                     })
                 # End of web scraping
 
-            #Defalut assistant_response    
+            # Defalut assistant_response    
             isFlag = False 
 
             # Dictionary
@@ -465,17 +583,31 @@ if prompt := st.chat_input("I would like to..."):
                 used_response = assistant_response
 
     # Display assistant response in chat message container
+    st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         streamed_text = ""
+
+        st.markdown(
+            f"""
+            <div class="chat-row">
+                <div class="chat-bubble assistant">
+        """, unsafe_allow_html=True)
 
         for chunk in used_response.split():
             streamed_text += chunk + " "
             time.sleep(0.05)
             message_placeholder.markdown(streamed_text + "▌")
-
         message_placeholder.markdown(streamed_text)
+
+        st.markdown(
+            f""" </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
         st.session_state.messages.append({"role": "assistant", "content": streamed_text})
+    st.markdown("</div>", unsafe_allow_html=True)
 
     #Summarize conversation of user
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]

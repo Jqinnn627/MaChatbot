@@ -30,4 +30,4 @@ Requirement:
 ##### run pip install -r requirements.txt to get dependencies
 ##### fastapi.py is used to host Manglish LLM, require at least 6GB GPU or else CUDA out of memory
 
-Dataset: 
+Dataset: https://huggingface.co/datasets/mesolitica/MaLLaM-2.5-Small-Manglish-QA

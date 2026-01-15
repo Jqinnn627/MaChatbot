@@ -79,10 +79,9 @@ vectorstore = PineconeVectorStore.from_existing_index(
 )
 
 #!--Build LLM--
-##prompt engineering
+#You are an AI assistant that communicates in a Malaysian-style tone: casual, slightly local (Manglish), but still clear and professional.
 system_prompt = SystemMessagePromptTemplate.from_template('''
     You are a helpful assistance.
-    You are an AI assistant that communicates in a Malaysian-style tone: casual, slightly local (Manglish), but still clear and professional.
     Always give accurate answers and logical reasoning.
     If information comes from retrieved documents, rely on them strictly.
     If unsure, you can provide your own opinion and provide them the keyword to google search online.
@@ -285,14 +284,24 @@ def manglish_response(context):
         return True, resp.json()["response"]
     except requests.exceptions.RequestException as e:
         return False, f"Request failed: {e}"
-    
+
+def is_question(text):
+    t = text.lower()
+    if "?" in t:
+        return True
+    if t.startswith(("can", "could you", "please", "help", "what", "why", "when", "how", "where")):
+        return True
+    return False
+
 # See if user is greeting or leaving
 def keyword_intent(text):
     t = text.lower()
-    if any(k in t for k in GREETING_KW):
-        return "greeting"
-    if any(k in t for k in LEAVING_KW):
-        return "goodbye"
+    for k in GREETING_KW:
+        if re.search(rf"\b{k}\b", t):
+            return "greeting"
+    for k in LEAVING_KW:
+        if re.search(rf"\b{k}\b", t):
+            return "goodbye"
     return None
 
 # Acknowledgement: Ohh/ Okok
@@ -305,6 +314,9 @@ def ack_intent(text: str) -> bool:
 
 # Function to detect content; default "others"
 def detect_intent(text):
+    if is_question(text):
+        return "others"
+    
     for fn in [ack_intent, keyword_intent]:
         intent = fn(text)
         if intent:
@@ -471,4 +483,4 @@ if prompt := st.chat_input("I would like to..."):
         st.session_state.last_summary_time = Messagenow
         st.session_state.last_summarized_len = len(st.session_state.messages)
     else:
-        None #Skip
+        print("Skip")

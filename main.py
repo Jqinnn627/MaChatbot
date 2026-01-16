@@ -31,6 +31,9 @@ import re
 #Image 
 import base64
 
+#Prevent HTML injection(?)\
+import html
+
 # Load Credential
 load_dotenv()
 
@@ -79,7 +82,8 @@ vectorstore = PineconeVectorStore.from_existing_index(
 )
 
 #!--Build LLM--
-#You are an AI assistant that communicates in a Malaysian-style tone: casual, slightly local (Manglish), but still clear and professional.
+# Prompt for manglish ↓
+# You are an AI assistant that communicates in a Malaysian-style tone: casual, slightly local (Manglish), but still clear and professional.
 system_prompt = SystemMessagePromptTemplate.from_template('''
     You are a helpful assistance.
     Always give accurate answers and logical reasoning.
@@ -140,6 +144,12 @@ summary_assistant = summary_prompt | llm
 
 #Result
 retrieval_chain = create_retrieval_chain(retriever, combine_docs_chain)
+
+############################
+#                          #
+#         FUNCTION         #
+#                          #
+############################
 
 # A function to create user record
 def ensure_user_exists(user_id):
@@ -202,7 +212,7 @@ def format_chat_history(messages, limit=6):
         if m["role"] in ("user", "assistant")
     )
 # Similarity Search
-SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant
+SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant score
 def retrieve_with_score(query, k=3):
     results = vectorstore.similarity_search_with_score(query, k=k)
 
@@ -228,7 +238,7 @@ def search_trusted_sources(query):
     for a in data.get("data", [])[:5]: # use 1st 5 links
         links.append(a["url"])
     return links
-# extract data one by one from Jina API
+# extract website data one by one from Jina API
 def fetch_document(url):
     try:
         r = requests.get(url, timeout=10)
@@ -402,9 +412,10 @@ st.markdown("""
     justify-self: end;
 }
 
-/* User chatbot */
+/* User icon */
 .st-emotion-cache-khw9fs{
     order:1;
+    background-color: white;
 }
             
 /* Body Background color*/
@@ -442,6 +453,7 @@ st.markdown("""
     background-color: #6A0DAD;
 }
 
+/*Send button*/
 .st-emotion-cache-1f3w014{
     color: white;
 }
@@ -462,7 +474,7 @@ for message in st.session_state.messages:
             f"""
             <div class="chat-row">
                 <div class="chat-bubble {role_class}">
-                    {message["content"]}
+                    {html.escape(message["content"])}
                 </div>
             </div>
             """,
@@ -485,7 +497,7 @@ if prompt := st.chat_input("I would like to..."):
             f"""
             <div class="chat-row">
                 <div class="chat-bubble user">
-                    {prompt}
+                    {html.escape(prompt)}
                 </div>
             </div>
             """,
@@ -578,9 +590,9 @@ if prompt := st.chat_input("I would like to..."):
 
             # true: final_response | false: assistant_response    
             if (isFlag == True):
-                used_response = final_response
+                used_response = html.escape(final_response)
             else:
-                used_response = assistant_response
+                used_response = html.escape(assistant_response)
 
     # Display assistant response in chat message container
     st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
@@ -588,24 +600,28 @@ if prompt := st.chat_input("I would like to..."):
         message_placeholder = st.empty()
         streamed_text = ""
 
-        st.markdown(
-            f"""
-            <div class="chat-row">
-                <div class="chat-bubble assistant">
-        """, unsafe_allow_html=True)
-
         for chunk in used_response.split():
             streamed_text += chunk + " "
             time.sleep(0.05)
-            message_placeholder.markdown(streamed_text + "▌")
-        message_placeholder.markdown(streamed_text)
+            message_placeholder.markdown(f"""
+                <div class="chat-row">
+                    <div class="chat-bubble assistant">
+                        {streamed_text}▌ 
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-        st.markdown(
-            f""" </div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        message_placeholder.markdown(f"""
+                <div class="chat-row">
+                    <div class="chat-bubble assistant">
+                        {streamed_text}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True)
+
         st.session_state.messages.append({"role": "assistant", "content": streamed_text})
     st.markdown("</div>", unsafe_allow_html=True)
 

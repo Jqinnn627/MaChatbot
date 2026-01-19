@@ -31,7 +31,7 @@ import re
 #Image 
 import base64
 
-#Prevent HTML injection(?)\
+#Prevent HTML injection
 import html
 
 # Load Credential
@@ -62,7 +62,28 @@ ACK_PATTERNS = [
     r"^mm+$",
     r"^hmm+$",
 ]
-
+# If user ask 'who are you'
+IDENTITY_PATTERNS = [
+    r"who are you",
+    r"who are u",
+    r"what are you",
+    r"what are u",
+    r"what is your name",
+    r"what's ur name",
+    r"what is ur name",
+    r"who created you",
+    r"who created u",
+    r"are you human",
+    r"are u human",
+    r"who is your",
+    r"who is ur",
+]
+# Chatbot Identity (change)
+BOT_IDENTITY = """
+I am Wahwah, an AI assistant designed to help answer questions using trusted information and reply in Malaysian tone.
+Created by UTAR MY CHOICE.
+I'm not human, but I try my best to help lah.
+""".strip()
 # init connection mysql
 conn = st.connection('mysql', type='sql')
 
@@ -282,9 +303,8 @@ def manglish_response(context):
     payload = {
         "query": context,
     }
-
     try:
-        resp = requests.post(url, json=payload, timeout=60)
+        resp = requests.post(url, json=payload, timeout=120)
         resp.raise_for_status()
         return True, resp.json()["response"]
     except requests.exceptions.RequestException as e:
@@ -307,6 +327,13 @@ def keyword_intent(text):
         if re.search(rf"\b{k}\b", t):
             return "goodbye"
     return None
+# Identity detect
+def identity_intent(text: str):
+    t = text.lower()
+    for p in IDENTITY_PATTERNS:
+        if re.search(p, t):
+            return "identity"
+    return None
 # Acknowledgement: Ohh/ Okok
 def ack_intent(text: str) -> bool:
     t = text.lower().strip()
@@ -316,6 +343,9 @@ def ack_intent(text: str) -> bool:
     return None
 # Function to detect content; default "others"
 def detect_intent(text):
+    if identity_intent(text):
+        return "identity"
+    
     if is_question(text):
         return "others"
     
@@ -329,19 +359,236 @@ def detect_intent(text):
 def img_to_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
-# UI
+# Pretty Display
+def format_numbered_paragraphs(text: str) -> str:
+    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r'(?<!^)\s(?=\d+\.)', '\n', text)
+    return text
+
+############################
+#                          #
+#        Start UI          #
+#                          #
+############################
+# CSS
+st.markdown("""
+<style>
+# /* ===============================
+#    DARK MODE
+# ================================ */
+/*Chat container*/            
+.chat-container {
+    max-width: 900px;
+    margin: auto;
+}
+
+/* Chat bubble */
+.chat-bubble {
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    width: auto;
+    font-size: 16px;
+}
+
+/* Assistant */
+.assistant {
+    display: flex;
+    justify-self: start;
+    flex-direction: column;
+}
+/*Assitant icon background*/
+.st-emotion-cache-z68l0b{
+    background-color: #ffffff;
+}
+
+/* User */
+.user {
+    display: flex;
+    color: #E6E6FA;
+    justify-self: end;
+}
+
+/* User icon */
+.st-emotion-cache-khw9fs{
+    order:1;
+    background-color: #E6E6FA;
+    color: black;
+}
+/*Light mode*/
+.st-emotion-cache-23r7bk{
+    order:1;
+    background-color: #1e0336;
+    color: white;
+}
+            
+/* Body Background color*/
+.st-emotion-cache-13k62yr {
+    background: #310854;
+}
+
+/*User chat bubble background*/
+.st-emotion-cache-1mph9ef{
+    background-color:#1e0336;
+    width:auto;
+    max-width:70%;
+    align-self:end;
+}
+/*light mode*/
+.st-emotion-cache-1fee4w7{
+    background-color:#9370dB;
+    width:auto;
+    max-width:70%;
+    align-self:end;
+}
+
+/*Bottom bar background color*/     
+.st-emotion-cache-1y34ygi{
+    background: #9370dB;
+}
+
+/* Chat row */
+.chat-row {
+    display: grid;
+}
+
+/*Send button*/
+.st-emotion-cache-1f3w014{
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
+# st.markdown("""
+# <style>
+
+# /* ===============================
+#    THEME VARIABLES
+# ================================ */
+
+# :root {
+#   -bg-app-: #f5f5f5;
+#   --bg-user: #e6e6e6;
+#   --bg-assistant: #ffffff;
+
+#   --text-main: #111111;
+#   --text-chat: #111111;
+
+#   --accent: #6c5ce7;
+# }
+
+# /* Dark mode */
+# [data-theme="dark"] {
+#   --bg-app: #310854;
+#   --bg-user: #1e0336;
+#   --bg-assistant: #2a0d4a;
+
+#   --text-main: #E6E6FA;
+#   --text-chat: #E6E6FA;
+
+#   --accent: #9370db;
+# }
+
+# /* ===============================
+#    APP BACKGROUND
+# ================================ */
+
+# .stApp {
+#   background-color: var(--bg-app);
+#   color: var(--text-main);
+# }
+
+# /* ===============================
+#    CHAT CONTAINER
+# ================================ */
+
+# .chat-container {
+#   max-width: 900px;
+#   margin: auto;
+# }
+
+# /* ===============================
+#    CHAT ROW
+# ================================ */
+
+# .chat-row {
+#   display: flex;
+#   margin-bottom: 10px;
+# }
+
+# /* ===============================
+#    CHAT BUBBLES
+# ================================ */
+
+# .chat-bubble {
+#   padding: 12px 16px;
+#   border-radius: 14px;
+#   font-size: 16px;
+#   max-width: 70%;
+#   color: var(--text-chat);
+#   word-wrap: break-word;
+# }
+
+# /* Assistant bubble */
+# .chat-bubble.assistant {
+#   background-color: var(--bg-assistant);
+#   align-self: flex-start;
+# }
+
+# /* User bubble */
+# .chat-bubble.user {
+#   background-color: var(--bg-user);
+#   align-self: flex-end;
+#   margin-left: auto;
+# }
+
+# /* ===============================
+#    ICON / AVATAR
+# ================================ */
+
+# .chat-avatar {
+#   background: white;
+#   border-radius: 50%;
+#   padding: 6px;
+#   margin-right: 6px;
+# }
+
+# /* User avatar on right */
+# .chat-avatar.user {
+#   order: 1;
+#   margin-left: 6px;
+#   margin-right: 0;
+# }
+
+# /* ===============================
+#    INPUT BAR & BUTTON
+# ================================ */
+
+# textarea, input {
+#   color: var(--text-main) !important;
+#   border-radius: 8px;
+# }
+
+# button {
+#   background-color: var(--accent) !important;
+#   color: white !important;
+#   border-radius: 8px;
+# }
+
+# </style>
+# """, unsafe_allow_html=True)
+
+st.html("<style> .stApp {overflow: hidden} </style>")
+img = img_to_base64("images/big-data.png")
 st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
     page_icon="images/big-data.png",
 )
-img = img_to_base64("images/big-data.png")
 
 st.markdown(
     f"""
     <div style="display:flex; justify-content:center; align-items:center; gap:12px;">
         <img src="data:image/png;base64,{img}" width="50">
-        <h1 style="margin:0; color:#E6E6FA">Chatbot</h1>
+        <h1 style="margin:0; color:">WahWah</h1>
     </div>
     """,
     unsafe_allow_html=True
@@ -377,89 +624,6 @@ if "last_summary_time" not in st.session_state:
 if "last_summarized_len" not in st.session_state:
     st.session_state.last_summarized_len = 0
 
-# CSS
-st.markdown("""
-<style>
-/*Chat container*/            
-.chat-container {
-    max-width: 900px;
-    margin: auto;
-}
-
-/* Chat bubble */
-.chat-bubble {
-    padding: 12px 16px;
-    margin-bottom: 10px;
-    width: auto;
-    font-size: 16px;
-}
-
-/* Assistant */
-.assistant {
-    display: flex;
-    color: #E6E6FA;
-    justify-self: start;
-}
-/*Assitant icon background*/
-.st-emotion-cache-z68l0b{
-    background-color: #ffffff;
-}
-
-/* User */
-.user {
-    display: flex;
-    color: #E6E6FA;
-    justify-self: end;
-}
-
-/* User icon */
-.st-emotion-cache-khw9fs{
-    order:1;
-    background-color: white;
-}
-            
-/* Body Background color*/
-.st-emotion-cache-13k62yr {
-    background: #310854;
-}
-
-/*User chat bubble background*/
-.st-emotion-cache-1mph9ef{
-    background-color:#1e0336;
-    width:auto;
-    max-width:70%;
-    align-self:end;
-}
-
-/*Bottom bar background color*/     
-.st-emotion-cache-1y34ygi{
-    background: #9370dB;
-}
-
-/* Chat row */
-.chat-row {
-    display: grid;
-}
-
-/* Text input background */
-.st-emotion-cache-1353z0o{
-	background-color: #6A0DAD;
-}
-/* Text input */
-.st-b1 {
-    background-color: #6A0DAD;
-}
-.st-emotion-cache-h3jt4q{
-    background-color: #6A0DAD;
-}
-
-/*Send button*/
-.st-emotion-cache-1f3w014{
-    color: white;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # Initialize chat history in session
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": "Hello World."}]
@@ -485,7 +649,7 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 Messagenow = datetime.now(pytz.timezone('Asia/Kuala_Lumpur'))
 # Accept user input
-if prompt := st.chat_input("I would like to..."):
+if prompt := st.chat_input("Got problem? Ask only!"):
     # Add user message to chat history
     st.session_state.messages.append({"role": "user", "content": prompt})
     chat_history = format_chat_history(st.session_state.messages)
@@ -514,6 +678,9 @@ if prompt := st.chat_input("I would like to..."):
                 "Reply naturally in Manglish to a greeting."
             )
             used_response = response.content
+        elif intent == "identity":
+            isFlag, styled = manglish_response(BOT_IDENTITY)
+            used_response = styled if isFlag else BOT_IDENTITY
         elif intent == "ack":
             used_response = "Yea"
         elif intent == "goodbye":
@@ -594,13 +761,15 @@ if prompt := st.chat_input("I would like to..."):
             else:
                 used_response = html.escape(assistant_response)
 
+    formatted_text = format_numbered_paragraphs(used_response)
+    formatted_text = formatted_text.replace("\n", "<br>")
     # Display assistant response in chat message container
     st.markdown("<div class='chat-container'>", unsafe_allow_html=True)
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         streamed_text = ""
 
-        for chunk in used_response.split():
+        for chunk in formatted_text.split():
             streamed_text += chunk + " "
             time.sleep(0.05)
             message_placeholder.markdown(f"""
@@ -622,10 +791,10 @@ if prompt := st.chat_input("I would like to..."):
                 """,
                 unsafe_allow_html=True)
 
-        st.session_state.messages.append({"role": "assistant", "content": streamed_text})
+        st.session_state.messages.append({"role": "assistant", "content": used_response})
     st.markdown("</div>", unsafe_allow_html=True)
 
-    #Summarize conversation of user
+    # Summarize conversation of user
     new_messages = st.session_state.messages[st.session_state.last_summarized_len:]
     time_passed = Messagenow - st.session_state.last_summary_time
 

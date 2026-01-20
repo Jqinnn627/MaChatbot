@@ -83,8 +83,7 @@ IDENTITY_PATTERNS = [
 ]
 # Chatbot Identity (change if needed)
 BOT_IDENTITY = """
-I am Ji Wahwah, an AI assistant designed to help answer questions using trusted information and reply in Malaysian tone.
-Created by UTAR MY CHOICE.
+I am Ji Wahwah, an AI assistant created by UTAR MY CHOICE which designed to help answer questions using trusted information and reply in Malaysian tone.
 I'm not human, but I try my best to help lah.
 """.strip()
 ALLOWED_TAGS = ['b','i','a','strong','em']

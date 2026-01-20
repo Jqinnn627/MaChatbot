@@ -31,8 +31,9 @@ import re
 #Image 
 import base64
 
-#Prevent HTML injection
+#Prevent HTML injection, try to keep the special character
 import html
+import bleach
 
 # Load Credential
 load_dotenv()
@@ -61,6 +62,8 @@ ACK_PATTERNS = [
     r"^eh+$",
     r"^mm+$",
     r"^hmm+$",
+    r"^thank+$",
+    r"^thank\s*you+$",
 ]
 # If user ask 'who are you'
 IDENTITY_PATTERNS = [
@@ -78,12 +81,14 @@ IDENTITY_PATTERNS = [
     r"who is your",
     r"who is ur",
 ]
-# Chatbot Identity (change)
+# Chatbot Identity (change if needed)
 BOT_IDENTITY = """
-I am Wahwah, an AI assistant designed to help answer questions using trusted information and reply in Malaysian tone.
+I am Ji Wahwah, an AI assistant designed to help answer questions using trusted information and reply in Malaysian tone.
 Created by UTAR MY CHOICE.
 I'm not human, but I try my best to help lah.
 """.strip()
+ALLOWED_TAGS = ['b','i','a','strong','em']
+ALLOWED_PROTOCOLS = ['http','https']
 # init connection mysql
 conn = st.connection('mysql', type='sql')
 
@@ -233,8 +238,8 @@ def format_chat_history(messages, limit=6):
         if m["role"] in ("user", "assistant")
     )
 # Similarity Search
-SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant score
-def retrieve_with_score(query, k=3):
+SIMILARITY_THRESHOLD = 0.8 # 0 -- 1  || irrelevant -- relevant score 
+def retrieve_with_score(query, k=5): #retrieve 5 documents(change if needed)
     results = vectorstore.similarity_search_with_score(query, k=k)
 
     good_docs = []
@@ -242,7 +247,7 @@ def retrieve_with_score(query, k=3):
         if score > SIMILARITY_THRESHOLD:
             good_docs.append(doc)
 
-    return good_docs, results
+    return good_docs
 # Jina API for online searching, it return data from trusted website 
 def search_trusted_sources(query):
     url = f"https://s.jina.ai/?q={query}"
@@ -264,7 +269,6 @@ def fetch_document(url):
     try:
         r = requests.get(url, timeout=10)
         soup = BeautifulSoup(r.text, "html.parser")
-
         text = soup.get_text(separator=" ", strip=True)
 
         if len(text) < 500:
@@ -276,7 +280,6 @@ def fetch_document(url):
                 page_content=chunk,
                 metadata={
                     "source": url,
-                    "type": "trusted_web"
                 }
             )
             for chunk in chunks
@@ -285,7 +288,7 @@ def fetch_document(url):
 
     except Exception as e:
         return None
-# Simplify searching (avoid too much token being used): Optional
+# Simplify searching (avoid using too much token): Optional
 def rewrite_query(query):
     prompt = f"""
         Rewrite this question into a short factual search query.
@@ -355,7 +358,7 @@ def detect_intent(text):
             return intent
 
     return "others"
-#Process image
+# Process image
 def img_to_base64(path):
     with open(path, "rb") as f:
         return base64.b64encode(f.read()).decode()
@@ -577,18 +580,18 @@ st.markdown("""
 # """, unsafe_allow_html=True)
 
 st.html("<style> .stApp {overflow: hidden} </style>")
-img = img_to_base64("images/big-data.png")
+img = img_to_base64("images/images.jpg")
 st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
-    page_icon="images/big-data.png",
+    page_icon="images/images.jpg",
 )
 
 st.markdown(
     f"""
     <div style="display:flex; justify-content:center; align-items:center; gap:12px;">
         <img src="data:image/png;base64,{img}" width="50">
-        <h1 style="margin:0; color:">WahWah</h1>
+        <h1 style="margin:0; color:">Ji WahWah</h1>
     </div>
     """,
     unsafe_allow_html=True
@@ -638,7 +641,7 @@ for message in st.session_state.messages:
             f"""
             <div class="chat-row">
                 <div class="chat-bubble {role_class}">
-                    {html.escape(message["content"])}
+                    {message["content"]}
                 </div>
             </div>
             """,
@@ -696,7 +699,7 @@ if prompt := st.chat_input("Got problem? Ask only!"):
                 search_query = prompt
 
             # checking similarity score
-            docs, raw_scores = retrieve_with_score(search_query)
+            docs = retrieve_with_score(search_query)
 
             # If Pinecone has good knowledge
             if len(docs) > 0:
@@ -723,7 +726,6 @@ if prompt := st.chat_input("Got problem? Ask only!"):
                         vectorstore.add_documents(doc)
                         # Debug if info stored
 
-
                 if len(web_texts) == 0:
                     ans_rag = {
                         "answer": (
@@ -747,20 +749,25 @@ if prompt := st.chat_input("Got problem? Ask only!"):
             # Dictionary
             if isinstance(ans_rag, dict):
                 assistant_response = ans_rag.get('answer', str(ans_rag))
-                print(assistant_response)
                 isFlag, final_response = manglish_response(assistant_response) # if error return false
             else:
                 # If string, use it directly
                 assistant_response = ans_rag
-                print(assistant_response)
                 isFlag, final_response = manglish_response(assistant_response)
 
+            print(assistant_response)
             # true: final_response | false: assistant_response    
             if (isFlag == True):
-                used_response = html.escape(final_response)
+                used_response = final_response
             else:
-                used_response = html.escape(assistant_response)
+                used_response = assistant_response
 
+    used_response = bleach.clean(
+        used_response,
+        tags=ALLOWED_TAGS,
+        protocols=ALLOWED_PROTOCOLS,
+        strip=True
+    )
     formatted_text = format_numbered_paragraphs(used_response)
     formatted_text = formatted_text.replace("\n", "<br>")
     # Display assistant response in chat message container
@@ -790,7 +797,6 @@ if prompt := st.chat_input("Got problem? Ask only!"):
                 </div>
                 """,
                 unsafe_allow_html=True)
-
         st.session_state.messages.append({"role": "assistant", "content": used_response})
     st.markdown("</div>", unsafe_allow_html=True)
 
